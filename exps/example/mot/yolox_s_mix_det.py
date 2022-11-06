@@ -17,8 +17,10 @@ class Exp(MyExp):
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
         self.train_ann = "train.json"
         self.val_ann = "train.json"
-        self.input_size = (608, 1088)
-        self.test_size = (608, 1088)
+        # self.input_size = (608, 1088)
+        # self.test_size = (608, 1088)
+        self.input_size = (480, 640)
+        self.test_size = (480, 640)
         self.random_size = (12, 26)
         self.max_epoch = 80
         self.print_interval = 20

@@ -8,6 +8,11 @@ import torch.nn as nn
 from .darknet import CSPDarknet
 from .network_blocks import BaseConv, CSPLayer, DWConv
 
+from torchvision import transforms
+mean = (0.485, 0.456, 0.406)
+std = (0.229, 0.224, 0.225)
+# torch_norm = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
+torch_norm = transforms.Compose([transforms.Normalize(mean, std)])
 
 class YOLOPAFPN(nn.Module):
     """
@@ -90,6 +95,13 @@ class YOLOPAFPN(nn.Module):
         """
 
         #  backbone
+
+        # normalizaion 
+        input /= 255.0
+        input = input.transpose(0,1).transpose(0,2)
+        input = torch_norm(input)
+        input = input.unsqueeze(0)
+
         out_features = self.backbone(input)
         features = [out_features[f] for f in self.in_features]
         [x2, x1, x0] = features
