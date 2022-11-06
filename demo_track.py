@@ -181,6 +181,9 @@ class Predictor(object):
             t3 = time.time()
             if self.decoder is not None:
                 outputs = self.decoder(outputs, dtype=outputs.type())
+            
+            print("shape    ", outputs.shape)
+            print("type     ", type(outputs))
             outputs = postprocess(
                 outputs, self.num_classes, self.confthre, self.nmsthre
             )

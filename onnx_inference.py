@@ -8,12 +8,13 @@ from loguru import logger
 import onnxruntime
 
 from yolox.data.data_augment import preproc as preprocess
-from yolox.utils import mkdir, multiclass_nms, demo_postprocess, vis
+from yolox.utils import mkdir, multiclass_nms, demo_postprocess, vis, postprocess
 from yolox.utils.visualize import plot_tracking
 from yolox.tracker.byte_tracker import BYTETracker
 from yolox.tracking_utils.timer import Timer
 
 import time
+import torch
 
 def make_parser():
     parser = argparse.ArgumentParser("onnxruntime inference sample")
@@ -28,7 +29,7 @@ def make_parser():
         "-i",
         "--video_path",
         type=str,
-        default='videos/palace.mp4',
+        default='videos/480x640.mp4',
         help="Path to your input image.",
     )
     parser.add_argument(
@@ -77,7 +78,7 @@ class Predictor(object):
         self.rgb_means = (0.485, 0.456, 0.406)
         self.std = (0.229, 0.224, 0.225)
         self.args = args
-        self.session = onnxruntime.InferenceSession(args.model, providers=['CUDAExecutionProvider'])
+        self.session = onnxruntime.InferenceSession(args.model)
         self.input_shape = tuple(map(int, args.input_shape.split(',')))
 
     def inference(self, ori_img, timer):
@@ -101,12 +102,14 @@ class Predictor(object):
         t2 = time.time()
         output = self.session.run(None, ort_inputs)
         t3 = time.time()
+
         # predictions = demo_postprocess(output[0], self.input_shape, p6=self.args.with_p6)[0]
-        predictions = postprocess(output[0])[0]
+        predictions = np.array(output[0][0])
+        # predictions = postpro(output[0])[0]  
+    
         t4 = time.time()
         boxes = predictions[:, :4]
         scores = predictions[:, 4:5] * predictions[:, 5:]
-
         boxes_xyxy = np.ones_like(boxes)
         boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2]/2.
         boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3]/2.
@@ -115,8 +118,15 @@ class Predictor(object):
         boxes_xyxy /= ratio
         dets = multiclass_nms(boxes_xyxy, scores, nms_thr=self.args.nms_thr, score_thr=self.args.score_thr)
 
+        ## add decoder to model
+        # outputs = torch.tensor(output)[0]
+        # outputs = postprocess(
+        #         outputs, 1, self.args.score_thr, self.args.nms_thr
+        #     )
+
         print("prepro %.5f pro %.5f postpro %.5f nms %.5f"%(t2-t1, t3-t2, t4-t3, time.time()-t4))
         return dets[:, :-1], img_info
+        # return outputs[0], img_info
 
 
 def imageflow_demo(predictor, args):
@@ -196,7 +206,7 @@ def STRIDES_AND_GRIDS(img_size=(480,640)):
 
 GRIDS = STRIDES_AND_GRIDS()[0]
 STRIDES = STRIDES_AND_GRIDS()[1]
-def postprocess(outputs):
+def postpro(outputs):
     outputs[..., :2] = (outputs[..., :2] + GRIDS) * STRIDES
     outputs[..., 2:4] = np.exp(outputs[..., 2:4]) * STRIDES
 
