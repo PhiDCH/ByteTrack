@@ -7,7 +7,7 @@ from loguru import logger
 
 import onnxruntime
 
-from yolox.data.data_augment import preproc as preprocess
+# from yolox.data.data_augment import preproc as preprocess
 from yolox.utils import mkdir, multiclass_nms, demo_postprocess, vis, postprocess
 from yolox.utils.visualize import plot_tracking
 from yolox.tracker.byte_tracker import BYTETracker
@@ -29,7 +29,7 @@ def make_parser():
         "-i",
         "--video_path",
         type=str,
-        default='videos/480x640.mp4',
+        default='videos/palace.mp4',
         help="Path to your input image.",
     )
     parser.add_argument(
@@ -72,6 +72,33 @@ def make_parser():
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
     return parser
 
+def preproc(image, input_size):
+    
+    if len(image.shape) == 3:
+        padded_img = np.ones((input_size[0], input_size[1], 3)) * 114.0
+    else:
+        padded_img = np.ones(input_size) * 114.0
+    img = np.array(image)
+    r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
+    resized_img = cv2.resize(
+        img,
+        (int(img.shape[1] * r), int(img.shape[0] * r)),
+        interpolation=cv2.INTER_LINEAR,
+    ).astype(np.float32)
+    padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
+
+    padded_img = padded_img[:, :, ::-1]
+
+    # padded_img /= 255.0
+    # if mean is not None:
+    #     padded_img -= mean
+    # if std is not None:
+    #     padded_img /= std
+
+    # padded_img = padded_img.transpose(swap)
+    padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
+
+    return padded_img, r
 
 class Predictor(object):
     def __init__(self, args):
@@ -90,10 +117,11 @@ class Predictor(object):
         img_info["width"] = width
         img_info["raw_img"] = ori_img
 
-        # img, ratio = preprocess(ori_img, self.input_shape, self.rgb_means, self.std)
-
-        ratio = 1
-        img = ori_img.astype(np.float32)
+        # preprocess with resize
+        img, ratio = preproc(ori_img, self.input_shape)
+        img = img.astype(np.float16)
+        # ratio = 1
+        # img = ori_img.astype(np.float32)
 
         img_info["ratio"] = ratio
         # ort_inputs = {self.session.get_inputs()[0].name: img[None, :, :, :]}
@@ -106,7 +134,6 @@ class Predictor(object):
         # predictions = demo_postprocess(output[0], self.input_shape, p6=self.args.with_p6)[0]
         predictions = np.array(output[0][0])
         # predictions = postpro(output[0])[0]  
-    
         t4 = time.time()
         boxes = predictions[:, :4]
         scores = predictions[:, 4:5] * predictions[:, 5:]
@@ -124,7 +151,7 @@ class Predictor(object):
         #         outputs, 1, self.args.score_thr, self.args.nms_thr
         #     )
 
-        print("prepro %.5f pro %.5f postpro %.5f nms %.5f"%(t2-t1, t3-t2, t4-t3, time.time()-t4))
+        # print("prepro %.5f pro %.5f postpro %.5f nms %.5f"%(t2-t1, t3-t2, t4-t3, time.time()-t4))
         return dets[:, :-1], img_info
         # return outputs[0], img_info
 
@@ -149,8 +176,8 @@ def imageflow_demo(predictor, args):
     frame_id = 0
     results = []
     while True:
-        # if frame_id % 20 == 0:
-        #     logger.info('Processing frame {} ({:.2f} fps)'.format(frame_id, 1. / max(1e-5, timer.average_time)))
+        if frame_id % 20 == 0:
+            logger.info('Processing frame {} ({:.2f} fps)'.format(frame_id, 1. / max(1e-5, timer.average_time)))
         ret_val, frame = cap.read()
         if ret_val:
             outputs, img_info = predictor.inference(frame, timer)
