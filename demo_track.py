@@ -31,7 +31,7 @@ def make_parser():
 
     parser.add_argument(
         #"--path", default="./datasets/mot/train/MOT17-05-FRCNN/img1", help="path to images or video"
-        "--path", default="./videos/480x640.mp4", help="path to images or video"
+        "--path", default="./videos/palace.mp4", help="path to images or video"
         # "--path", default="1.png", help="path to images or video"
     )
     parser.add_argument("--camid", type=int, default=0, help="webcam demo camera id")
@@ -163,12 +163,9 @@ class Predictor(object):
         img_info["width"] = width
         img_info["raw_img"] = img
 
-        # img, ratio = preproc(img, self.test_size, self.rgb_means, self.std)
-        ratio = 1 
-        # img = img.astype(np.float32)
-        img_info["ratio"] = ratio
-        # img = torch.from_numpy(img).unsqueeze(0).float().to(self.device)
         t1 = time.time()
+        img, ratio = preproc(img, self.test_size, self.rgb_means, self.std)
+        img_info["ratio"] = ratio
         img = torch.from_numpy(img.copy()).float().to(self.device)
 
         if self.fp16:
@@ -181,9 +178,6 @@ class Predictor(object):
             t3 = time.time()
             if self.decoder is not None:
                 outputs = self.decoder(outputs, dtype=outputs.type())
-            
-            print("shape    ", outputs.shape)
-            print("type     ", type(outputs))
             outputs = postprocess(
                 outputs, self.num_classes, self.confthre, self.nmsthre
             )

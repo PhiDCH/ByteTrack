@@ -13,6 +13,8 @@ from yolox.tracker.byte_tracker import BYTETracker
 from yolox.tracking_utils.timer import Timer
 
 import time
+import torch.nn.functional as F
+import torch
 
 def make_parser():
     parser = argparse.ArgumentParser("onnxruntime inference sample")
@@ -70,32 +72,63 @@ def make_parser():
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
     return parser
 
-def preproc(image, input_size):
-    
+def preproc(image, input_size, dtype=np.float32):
+    t1 = time.time()
     if len(image.shape) == 3:
         padded_img = np.ones((input_size[0], input_size[1], 3)) * 114.0
     else:
         padded_img = np.ones(input_size) * 114.0
     img = np.array(image)
     r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
+
+    # img_tensor = torch.from_numpy(img).unsqueeze(0).unsqueeze(0)
+    # size = (int(img.shape[0] * r), int(img.shape[1] * r), 3)
+    # img_tensor = F.interpolate(img_tensor, size=size, mode="nearest")
+    # resized_img = img_tensor.squeeze().cpu().numpy()
+
     resized_img = cv2.resize(
         img,
         (int(img.shape[1] * r), int(img.shape[0] * r)),
-        interpolation=cv2.INTER_LINEAR,
-    ).astype(np.float32)
+        interpolation=cv2.INTER_NEAREST,
+    )
+    t2 = time.time()
+
     padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
 
     padded_img = padded_img[:, :, ::-1]
-    padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
+    t3 = time.time()
+    padded_img = np.ascontiguousarray(padded_img, dtype=dtype)
+    print("resize %.5f pad %.5f astype %.5f"%(t2-t1,t3-t2,time.time()-t3))
 
     return padded_img, r
 
 class Predictor(object):
     def __init__(self, args):
-        self.rgb_means = (0.485, 0.456, 0.406)
-        self.std = (0.229, 0.224, 0.225)
         self.args = args
-        self.session = onnxruntime.InferenceSession(args.model)
+        # self.session = onnxruntime.InferenceSession(args.model)
+
+        providers = [
+        ('CUDAExecutionProvider', {
+            'device_id': 0,
+            'arena_extend_strategy': 'kNextPowerOfTwo',
+            'gpu_mem_limit': 6 * 1024 * 1024 * 1024,
+            'cudnn_conv_algo_search': 'EXHAUSTIVE',
+            'do_copy_in_default_stream': True,
+        }),
+        'CPUExecutionProvider',
+        ]
+        # model = "480x640_fp16.onnx"
+        # self.dtype = np.float16
+
+        model = "480x640.onnx"
+        self.dtype = np.float32
+
+        self.session = onnxruntime.InferenceSession(model, providers=providers)
+        self.io_binding = self.session.io_binding()
+        self.cpu_input = np.ones((480,640,3), dtype=np.float32)
+        # self.io_binding.bind_cpu_input('images', self.cpu_input)
+        self.io_binding.bind_output('output')
+
         self.input_shape = tuple(map(int, args.input_shape.split(',')))
 
     def inference(self, ori_img, timer):
@@ -108,23 +141,24 @@ class Predictor(object):
         img_info["raw_img"] = ori_img
 
         # preprocess with resize
-        img, ratio = preproc(ori_img, self.input_shape)
-        img = img.astype(np.float16)
+        img, ratio = preproc(ori_img, self.input_shape, self.dtype)
+        # no resize
+        # img = ori_img.astype(np.float16)
         # ratio = 1
-        # img = ori_img.astype(np.float32)
-
         img_info["ratio"] = ratio
-        # ort_inputs = {self.session.get_inputs()[0].name: img[None, :, :, :]}
-        ort_inputs = {self.session.get_inputs()[0].name: img}
-        # timer.tic()
-        t2 = time.time()
-        output = self.session.run(None, ort_inputs)
-        t3 = time.time()
 
-        # predictions = demo_postprocess(output[0], self.input_shape, p6=self.args.with_p6)[0]
-        predictions = np.array(output[0][0])
-        # predictions = postpro(output[0])[0]  
-        t4 = time.time()
+        t11 = time.time()
+        # self.io_binding.bind_cpu_input('images', img)
+        self.io_binding.bind_cpu_input('images', img)
+        t2 = time.time()
+        # ort_inputs = {self.session.get_inputs()[0].name: img}
+        # output = self.session.run(None, ort_inputs)
+
+        self.session.run_with_iobinding(self.io_binding)
+        output = self.io_binding.copy_outputs_to_cpu()[0]
+
+        t3 = time.time()
+        predictions = output[0]
         boxes = predictions[:, :4]
         scores = predictions[:, 4:5] * predictions[:, 5:]
         boxes_xyxy = np.ones_like(boxes)
@@ -135,8 +169,7 @@ class Predictor(object):
         boxes_xyxy /= ratio
         dets = multiclass_nms(boxes_xyxy, scores, nms_thr=self.args.nms_thr, score_thr=self.args.score_thr)
 
-
-        # print("prepro %.5f pro %.5f postpro %.5f nms %.5f"%(t2-t1, t3-t2, t4-t3, time.time()-t4))
+        # print("prepro %.5f binding %.5f pro %.5f postpro %.5f"%(t11-t1, t2 - t11, t3-t2, time.time()-t3))
         return dets[:, :-1], img_info
 
 
