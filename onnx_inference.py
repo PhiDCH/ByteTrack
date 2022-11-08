@@ -7,14 +7,12 @@ from loguru import logger
 
 import onnxruntime
 
-# from yolox.data.data_augment import preproc as preprocess
-from yolox.utils import mkdir, multiclass_nms, demo_postprocess, vis, postprocess
+from yolox.utils import multiclass_nms
 from yolox.utils.visualize import plot_tracking
 from yolox.tracker.byte_tracker import BYTETracker
 from yolox.tracking_utils.timer import Timer
 
 import time
-import torch
 
 def make_parser():
     parser = argparse.ArgumentParser("onnxruntime inference sample")
@@ -88,14 +86,6 @@ def preproc(image, input_size):
     padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
 
     padded_img = padded_img[:, :, ::-1]
-
-    # padded_img /= 255.0
-    # if mean is not None:
-    #     padded_img -= mean
-    # if std is not None:
-    #     padded_img /= std
-
-    # padded_img = padded_img.transpose(swap)
     padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
 
     return padded_img, r
@@ -145,15 +135,9 @@ class Predictor(object):
         boxes_xyxy /= ratio
         dets = multiclass_nms(boxes_xyxy, scores, nms_thr=self.args.nms_thr, score_thr=self.args.score_thr)
 
-        ## add decoder to model
-        # outputs = torch.tensor(output)[0]
-        # outputs = postprocess(
-        #         outputs, 1, self.args.score_thr, self.args.nms_thr
-        #     )
 
         # print("prepro %.5f pro %.5f postpro %.5f nms %.5f"%(t2-t1, t3-t2, t4-t3, time.time()-t4))
         return dets[:, :-1], img_info
-        # return outputs[0], img_info
 
 
 def imageflow_demo(predictor, args):
@@ -210,34 +194,6 @@ def imageflow_demo(predictor, args):
             break
         frame_id += 1
     
-    
-
-
-def STRIDES_AND_GRIDS(img_size=(480,640)):
-    grids = []
-    expanded_strides = []
-    strides = [8, 16, 32]
-    hsizes = [img_size[0] // stride for stride in strides]
-    wsizes = [img_size[1] // stride for stride in strides]
-
-    for hsize, wsize, stride in zip(hsizes, wsizes, strides):
-        xv, yv = np.meshgrid(np.arange(wsize), np.arange(hsize))
-        grid = np.stack((xv, yv), 2).reshape(1, -1, 2)
-        grids.append(grid)
-        shape = grid.shape[:2]
-        expanded_strides.append(np.full((*shape, 1), stride))
-
-    grids = np.concatenate(grids, 1)
-    expanded_strides = np.concatenate(expanded_strides, 1)
-    return (grids, expanded_strides)
-
-GRIDS = STRIDES_AND_GRIDS()[0]
-STRIDES = STRIDES_AND_GRIDS()[1]
-def postpro(outputs):
-    outputs[..., :2] = (outputs[..., :2] + GRIDS) * STRIDES
-    outputs[..., 2:4] = np.exp(outputs[..., 2:4]) * STRIDES
-
-    return outputs
 
 if __name__ == '__main__':
     args = make_parser().parse_args()
