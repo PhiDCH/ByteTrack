@@ -12,9 +12,6 @@ from yolox.utils.visualize import plot_tracking
 from yolox.tracker.byte_tracker import BYTETracker
 from yolox.tracking_utils.timer import Timer
 
-import time
-import torch.nn.functional as F
-import torch
 
 def make_parser():
     parser = argparse.ArgumentParser("onnxruntime inference sample")
@@ -72,33 +69,21 @@ def make_parser():
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
     return parser
 
-def preproc(image, input_size, dtype=np.float32):
-    t1 = time.time()
-    if len(image.shape) == 3:
+def preproc(img, input_size):
+    if len(img.shape) == 3:
         padded_img = np.ones((input_size[0], input_size[1], 3)) * 114.0
     else:
         padded_img = np.ones(input_size) * 114.0
-    img = np.array(image)
     r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
-
-    # img_tensor = torch.from_numpy(img).unsqueeze(0).unsqueeze(0)
-    # size = (int(img.shape[0] * r), int(img.shape[1] * r), 3)
-    # img_tensor = F.interpolate(img_tensor, size=size, mode="nearest")
-    # resized_img = img_tensor.squeeze().cpu().numpy()
 
     resized_img = cv2.resize(
         img,
         (int(img.shape[1] * r), int(img.shape[0] * r)),
         interpolation=cv2.INTER_NEAREST,
     )
-    t2 = time.time()
 
     padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
-
     padded_img = padded_img[:, :, ::-1]
-    t3 = time.time()
-    padded_img = np.ascontiguousarray(padded_img, dtype=dtype)
-    print("resize %.5f pad %.5f astype %.5f"%(t2-t1,t3-t2,time.time()-t3))
 
     return padded_img, r
 
@@ -141,7 +126,8 @@ class Predictor(object):
         img_info["raw_img"] = ori_img
 
         # preprocess with resize
-        img, ratio = preproc(ori_img, self.input_shape, self.dtype)
+        img, ratio = preproc(ori_img, self.input_shape)
+        img = img.astype(self.dtype)
         # no resize
         # img = ori_img.astype(np.float16)
         # ratio = 1
